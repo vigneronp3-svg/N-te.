@@ -234,6 +234,25 @@ ul{list-style:none;margin:0;padding:0;position:relative;z-index:1}
 #ed-title::placeholder,#ed-text::placeholder{color:var(--muted)}
 .status{text-align:center;font-size:12px;color:var(--muted);padding-top:24px}
 
+/* ---------- reminders ---------- */
+[hidden]{display:none!important}
+.meta .rem{display:inline-flex;align-items:center;gap:4px}
+.meta .rem svg{width:11px;height:11px}
+.meta .rem.past{color:var(--danger);font-weight:600}
+.act+.act{margin-left:-6px}
+.timepick{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:18px;background:var(--soft);margin-bottom:12px;font-size:15px}
+.timepick input{border:0;background:transparent;font-size:17px;font-weight:600;outline:none;text-align:right;min-width:90px}
+.perm{font-size:12px;color:var(--muted);margin:0 4px 14px;line-height:1.4}
+.toasts{position:fixed;top:calc(env(safe-area-inset-top,0px) + 10px);left:0;right:0;z-index:40;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;padding:0 max(12px,env(safe-area-inset-right,0px)) 0 max(12px,env(safe-area-inset-left,0px))}
+.toast{pointer-events:auto;width:100%;max-width:520px;box-sizing:border-box;border-radius:24px;padding:10px 10px 10px 12px;display:flex;gap:12px;align-items:center;cursor:pointer;background:linear-gradient(160deg,var(--g-strong),var(--g-fill))!important;transition:transform .5s var(--soft-spring),opacity .35s}
+.toast>*{position:relative;z-index:1}
+.toast .ic{flex:none;width:36px;height:36px;border-radius:50%;background:var(--ink);color:var(--bg);display:grid;place-items:center}
+.toast .ic svg{width:17px;height:17px}
+.toast .tx{flex:1;min-width:0}
+.toast b{display:block;font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.toast span{font-size:12px;color:var(--muted)}
+.toast .tdone{flex:none;height:34px;padding:0 14px;border-radius:999px;background:var(--soft);font-size:13px;font-weight:600}
+.toast.out{transform:translateY(-140%);opacity:0}
 @keyframes pop{0%{transform:scale(1)}30%{transform:scale(.72)}65%{transform:scale(1.16)}100%{transform:scale(1)}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 </style>
@@ -265,12 +284,17 @@ ul{list-style:none;margin:0;padding:0;position:relative;z-index:1}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></svg>
       <span id="rep-new-lbl"></span>
     </button>
+    <button class="rep-btn" type="button" id="rem-new" aria-label="Rappel">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+      <span id="rem-new-lbl"></span>
+    </button>
     <button class="add" type="submit" aria-label="Ajouter">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
     </button>
   </form>
 </div>
 
+<div class="toasts" id="toasts" aria-live="polite"></div>
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet" role="dialog" aria-label="Répétition">
   <div class="panel glass" id="panel">
@@ -279,6 +303,8 @@ ul{list-style:none;margin:0;padding:0;position:relative;z-index:1}
     <p class="sub" id="sheet-sub"></p>
     <div class="opts" id="opts"></div>
     <div class="wd" id="wd"></div>
+    <label class="timepick" id="tp" hidden><span>Autre heure</span><input type="time" id="tp-in"></label>
+    <p class="perm" id="perm" hidden></p>
     <button class="ok" id="sheet-ok">OK</button>
   </div>
 </div>
@@ -313,7 +339,8 @@ let calOpen = false, monthCursor = null, stripDir = 0;
 let lastView = null;
 const prevBlob = {};
 let newRepeat = [];
-let sheetTarget = null, sheetDays = [];
+let sheetTarget = null, sheetDays = [], sheetMode = "repeat", sheetTime = "";
+let newRemind = "";
 
 try { tab = localStorage.getItem("carnet.tab") || "tasks"; calOpen = localStorage.getItem("carnet.cal") === "1"; } catch(e){}
 try { items = JSON.parse(localStorage.getItem(CACHE) || "{}") || {}; } catch(e){ items = {}; }
@@ -353,6 +380,7 @@ const I = {
   chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
   l:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>',
   r:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
+  bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
   tick:'<svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'
 };
 function fmt(t){
@@ -427,6 +455,10 @@ function render(){
   $("rep-new").classList.toggle("hide", !isT);
   $("rep-new").classList.toggle("on", newRepeat.length > 0);
   $("rep-new-lbl").textContent = newRepeat.length ? repLabel(newRepeat) : "";
+  $("rem-new").classList.toggle("hide", !isT);
+  $("rem-new").classList.toggle("on", !!newRemind);
+  $("rem-new-lbl").textContent = newRemind ? fmtT(newRemind) : "";
+  updateBadge();
   $("input").placeholder = isT ? (sel === todayKey() ? "Nouvelle tâche" : "Tâche · " + parse(sel).toLocaleDateString("fr-FR",{weekday:"short",day:"numeric"})) : "Nouvelle note";
 
   const view = isT ? "t:" + sel : "n";
@@ -522,10 +554,12 @@ function taskRow(x){
   const {id, t, done, late} = x;
   const meta = [];
   if (isRep(t)) meta.push(`<span class="rep">${I.rep}${repLabel(t.repeat)}</span>`);
+  if (t.remind) { const past = !done && (late || (sel === todayKey() && t.remind <= nowHM()) || sel < todayKey()); meta.push(`<span class="rem${past?" past":""}">${I.bell}${fmtT(t.remind)}</span>`); }
   if (late) meta.push(`<span class="late">En retard · ${parse(late).toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}</span>`);
   return `<li class="task${done?" done":""}" data-flip="${id}" data-id="${id}">
     <button class="check" data-act="toggle" aria-label="${done?"Rouvrir":"Terminer"}">${I.check}</button>
     <div class="body"><span class="txt" contenteditable="${done?"false":"true"}" data-act="edit" spellcheck="false">${esc(t.text)}</span>${meta.length?`<div class="meta">${meta.join("")}</div>`:""}</div>
+    <button class="act${t.remind?" on":""}" data-act="remind" aria-label="Rappel">${I.bell}</button>
     <button class="act${isRep(t)?" on":""}" data-act="repeat" aria-label="Répétition">${I.rep}</button>
     <button class="act" data-act="del" aria-label="Supprimer">${I.x}</button>
   </li>`;
@@ -578,8 +612,9 @@ $("form").addEventListener("submit", e => {
   if (tab === "tasks") {
     const t = {type:"task", text:v, done:false, date:sel, created:now, updated:now};
     if (newRepeat.length) { t.repeat = [...newRepeat]; t.doneDates = {}; }
-    newRepeat = [];
-    put(id, t); render();
+    if (newRemind) t.remind = newRemind;
+    newRepeat = []; newRemind = "";
+    put(id, t); armReminder(id); render();
   } else { put(id, {type:"note", title:v, text:"", created:now, updated:now}); render(); openNote(id, true); }
 });
 
@@ -628,6 +663,7 @@ $("main").addEventListener("click", e => {
     setTimeout(() => { drop(id); render(); }, 250);
   }
   if (act === "repeat") openSheet(id);
+  if (act === "remind") openSheet(id, "remind");
 });
 
 function toggleFold(){
@@ -661,26 +697,51 @@ $("main").addEventListener("focusout", e => {
 
 /* ---------- repeat sheet ---------- */
 const PRESETS = [["Jamais",[]],["Tous les jours",[0,1,2,3,4,5,6]],["En semaine",[1,2,3,4,5]],["Le week-end",[0,6]]];
-function openSheet(target){
-  sheetTarget = target;
+function openSheet(target, mode = "repeat"){
+  sheetTarget = target; sheetMode = mode;
   sheetDays = target === "new" ? [...newRepeat] : [...(items[target]?.repeat || [])];
-  $("sheet-sub").textContent = target === "new" ? "La tâche revient automatiquement les jours choisis." : "« " + (items[target]?.text || "") + " »";
+  sheetTime = target === "new" ? newRemind : (items[target]?.remind || "");
+  const rep = mode === "repeat";
+  $("sheet-h").textContent = rep ? "Répéter" : "Rappel";
+  $("sheet").setAttribute("aria-label", rep ? "Répétition" : "Rappel");
+  $("sheet-sub").textContent = target === "new"
+    ? (rep ? "La tâche revient automatiquement les jours choisis." : "Une notification à l'heure choisie, le jour de la tâche.")
+    : "« " + (items[target]?.text || "") + " »";
   drawSheet();
   $("sheet").style.transform = "";
   $("scrim").classList.add("open"); $("sheet").classList.add("open");
 }
+const TIMES = [["Aucun",""],["9:00","09:00"],["12:00","12:00"],["18:00","18:00"]];
 function drawSheet(){
+  const rep = sheetMode === "repeat";
+  $("wd").hidden = !rep; $("tp").hidden = rep;
+  const pt = rep ? "" : permText(); $("perm").hidden = !pt; $("perm").textContent = pt;
+  if (!rep) {
+    $("opts").innerHTML = TIMES.map(([l,v]) => `<button class="opt${v===sheetTime?" on":""}" data-t="${v}">${l}${I.tick}</button>`).join("");
+    if ($("tp-in").value !== sheetTime) $("tp-in").value = sheetTime;
+    return;
+  }
   const s = [...sheetDays].sort().join();
   $("opts").innerHTML = PRESETS.map(([l,d],i) => `<button class="opt${[...d].sort().join()===s?" on":""}" data-p="${i}">${l}${I.tick}</button>`).join("");
   $("wd").innerHTML = ORDER.map(d => `<button class="${sheetDays.includes(d)?"on":""}" data-d="${d}" aria-label="${DOW_SHORT[d]}">${DOW_1[d]}</button>`).join("");
 }
-$("opts").addEventListener("click", e => { const b = e.target.closest("[data-p]"); if (!b) return; sheetDays = [...PRESETS[+b.dataset.p][1]]; drawSheet(); });
+$("tp-in").addEventListener("change", e => { sheetTime = e.target.value || ""; drawSheet(); });
+$("opts").addEventListener("click", e => { const tb = e.target.closest("[data-t]"); if (tb) { sheetTime = tb.dataset.t; drawSheet(); return; } const b = e.target.closest("[data-p]"); if (!b) return; sheetDays = [...PRESETS[+b.dataset.p][1]]; drawSheet(); });
 $("wd").addEventListener("click", e => {
   const b = e.target.closest("[data-d]"); if (!b) return; const d = +b.dataset.d;
   sheetDays = sheetDays.includes(d) ? sheetDays.filter(x => x !== d) : [...sheetDays, d]; drawSheet();
 });
 function closeSheet(apply){
-  if (apply && sheetTarget) {
+  if (apply && sheetTarget && sheetMode === "remind") {
+    if (sheetTime) askPermission();
+    if (sheetTarget === "new") newRemind = sheetTime;
+    else if (items[sheetTarget]) {
+      const v = {...items[sheetTarget], updated:Date.now()};
+      if (sheetTime) v.remind = sheetTime; else delete v.remind;
+      put(sheetTarget, v); armReminder(sheetTarget);
+    }
+  }
+  else if (apply && sheetTarget) {
     if (sheetTarget === "new") newRepeat = [...sheetDays];
     else {
       const t = items[sheetTarget];
@@ -700,6 +761,7 @@ function closeSheet(apply){
   render();
 }
 $("rep-new").addEventListener("click", () => openSheet("new"));
+$("rem-new").addEventListener("click", () => openSheet("new", "remind"));
 $("sheet-ok").addEventListener("click", () => closeSheet(true));
 $("scrim").addEventListener("click", () => closeSheet(false));
 (() => {
@@ -755,12 +817,89 @@ $("ed-actions").addEventListener("click", async e => {
   else if (b.id === "ed-no") resetDel();
   else if (b.id === "ed-yes") { clearTimeout(saveTimer); await drop(openId); hideEditor(); }
 });
+/* ---------- reminders ---------- */
+const NKEY = "carnet.notified";
+let notified = {};
+try { notified = JSON.parse(localStorage.getItem(NKEY) || "{}") || {}; } catch(e){}
+const saveNotified = () => { try { localStorage.setItem(NKEY, JSON.stringify(notified)); } catch(e){} };
+function nowHM(){ const n = new Date(); return pad(n.getHours()) + ":" + pad(n.getMinutes()); }
+function fmtT(v){ return v ? v.replace(/^0/, "") : ""; }
+const canNotify = () => typeof Notification !== "undefined";
+function permText(){
+  if (!canNotify()) return "Sur iPhone : ajoute N@te. à l'écran d'accueil pour recevoir les notifications. Sinon le rappel s'affiche dans l'appli.";
+  if (Notification.permission === "denied") return "Notifications bloquées dans les Réglages : le rappel s'affichera seulement dans l'appli.";
+  if (Notification.permission === "default") return "N@te. te demandera l'autorisation d'envoyer des notifications.";
+  return "";
+}
+function askPermission(){ try { if (canNotify() && Notification.permission === "default") Notification.requestPermission().then(updateBadge).catch(() => {}); } catch(e){} }
+function updateBadge(){
+  try {
+    const n = tasksFor(todayKey()).filter(x => !x.done).length;
+    const p = n ? navigator.setAppBadge?.(n) : navigator.clearAppBadge?.();
+    p?.catch?.(() => {});
+  } catch(e){}
+}
+function remKey(x, tk){ return x.id + "@" + (x.late || tk); }
+function armReminder(id){
+  for (const k in notified) if (k.startsWith(id + "@")) delete notified[k];
+  const t = items[id], tk = todayKey();
+  if (t?.remind && t.remind <= nowHM()) for (const x of tasksFor(tk)) if (x.id === id) notified[remKey(x, tk)] = 1;
+  saveNotified(); checkReminders();
+}
+async function sysNotify(title, body, tag){
+  if (!canNotify() || Notification.permission !== "granted") return false;
+  const opts = {body, tag, icon:"icon-192.png", badge:"icon-192.png"};
+  try { const reg = await navigator.serviceWorker?.getRegistration(); if (reg) { await reg.showNotification(title, opts); return true; } } catch(e){}
+  try { new Notification(title, opts); return true; } catch(e){ return false; }
+}
+function checkReminders(){
+  const tk = todayKey(), hm = nowHM(), due = [];
+  for (const x of tasksFor(tk)) {
+    if (x.done || !x.t.remind) continue;
+    const k = remKey(x, tk);
+    if (notified[k] || (!x.late && x.t.remind > hm)) continue;
+    notified[k] = 1; due.push(x);
+  }
+  if (!due.length) return;
+  const lim = addDays(tk, -7);
+  for (const k in notified) if (k.split("@")[1] < lim) delete notified[k];
+  saveNotified();
+  if (document.hidden) due.forEach(x => sysNotify(x.late ? "En retard" : "Rappel · " + fmtT(x.t.remind), x.t.text, x.id));
+  else if (due.length > 3) toast(null, due.length + " rappels", due.map(x => x.t.text).join(" · "));
+  else due.forEach(x => toast(x.id, x.t.text, x.late ? "En retard" : "Rappel · " + fmtT(x.t.remind)));
+  if (!openId && !sheetTarget) render();
+}
+function toast(id, title, sub){
+  const el = document.createElement("div");
+  el.className = "toast glass"; el.setAttribute("role", "status");
+  el.innerHTML = `<div class="ic">${I.bell}</div><div class="tx"><b>${esc(title)}</b><span>${esc(sub)}</span></div>${id ? `<button class="tdone">Fait</button>` : ""}`;
+  $("toasts").appendChild(el);
+  anim(el, [{transform:"translateY(-120%) scale(.9)", opacity:0},{transform:"none", opacity:1}], {duration:650, easing:SPRING});
+  try { navigator.vibrate?.(30); } catch(e){}
+  let gone = false;
+  const close = () => { if (gone) return; gone = true; el.classList.add("out"); setTimeout(() => el.remove(), 450); };
+  const timer = setTimeout(close, 9000);
+  el.addEventListener("click", e => {
+    clearTimeout(timer); close();
+    const tk = todayKey();
+    if (e.target.closest(".tdone") && id && items[id]) {
+      const t = items[id];
+      put(id, isRep(t) ? {...t, doneDates:prune({...(t.doneDates||{}), [tk]:true}), updated:Date.now()} : {...t, done:true, updated:Date.now()});
+    }
+    if (tab !== "tasks") { tab = "tasks"; try { localStorage.setItem("carnet.tab", tab); } catch(_){} }
+    if (!openId && !sheetTarget) { if (sel !== tk) go(tk); else render(); }
+  });
+}
+setInterval(checkReminders, 10000);
+window.addEventListener("focus", checkReminders);
 document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) setTimeout(checkReminders, 400);
   if (document.hidden && openId) saveNote();
   if (!document.hidden && !openId && !sheetTarget) render();
 });
 
 render();
+setTimeout(checkReminders, 600);
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
 })();
